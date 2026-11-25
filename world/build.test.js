@@ -182,3 +182,26 @@ describe('種類ごとの変換', () => {
     for (const line of JSON.parse(files['part-0.json']).disasters[0].pages[0].body) for (const v of line) assert.equal(typeof v, 'string')
   })
 })
+
+describe('イベント予定', () => {
+  const calendar = [
+    { id: 'a-2026-11-25', series: 'a', title: '昨日の回', date: '2026-11-25', start: '21:00', end: '22:00', place: '', body: '', url: '', repeat: '毎週水曜' },
+    { id: 'a-2026-12-02', series: 'a', title: '定例', date: '2026-12-02', start: '21:00', end: '22:30', place: 'ワールド', body: '説明', url: 'https://example.com', repeat: '毎週水曜' },
+  ]
+  it('過ぎた日を落とし、日時・場所・繰り返しを出す', () => {
+    // 日本時間 2026-11-26 の朝
+    const { files } = buildWorld({ ...empty, calendar }, { now: new Date('2026-11-25T23:00:00Z') })
+    const list = JSON.parse(files['part-0.json']).calendar
+    assert.equal(list.length, 1)
+    const [x] = list
+    assert.equal(x.id, 'a-2026-12-02')
+    assert.equal(x.sub, '12月2日（水） 21:00〜22:30')
+    assert.equal(x.summary, 'ワールド')
+    assert.deepEqual([x.date, x.start, x.end, x.repeat, x.series], ['2026-12-02', '21:00', '22:30', '毎週水曜', 'a'])
+    assert.deepEqual(x.info, [['日時', '12月2日（水） 21:00〜22:30'], ['場所', 'ワールド'], ['繰り返し', '毎週水曜']])
+    assert.deepEqual(x.pages[0].body, [['p', '説明'], ['url', 'リンク', 'https://example.com']])
+  })
+  it('公式サイトの書き出しに予定が無くても空の一覧', () => {
+    assert.deepEqual(part({}, 'calendar'), [])
+  })
+})

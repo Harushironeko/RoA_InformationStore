@@ -12,10 +12,10 @@ export const PART_SLOTS = 8
 export const PART_BYTES = 300 * 1024
 export const LINE_CHARS = 2000
 // 目次に載せる順（＝枠に詰める順）。短くてよく見るものを前に置く
-export const KINDS = ['news', 'contents', 'staff', 'qa', 'guideline', 'timeline', 'characters', 'organizations', 'nations', 'lore', 'disasters', 'stories']
+export const KINDS = ['news', 'calendar', 'contents', 'staff', 'qa', 'guideline', 'timeline', 'characters', 'organizations', 'nations', 'lore', 'disasters', 'stories']
 // ワールドの一覧に出す名前（目次の kinds）。並びは KINDS と同じ
 export const KIND_LABELS = {
-  news: 'ニュース', contents: '公式コンテンツ', staff: 'クレジット', qa: 'Q&A', guideline: '二次創作ガイドライン', timeline: '年表',
+  news: 'ニュース', calendar: 'イベント予定', contents: '公式コンテンツ', staff: 'クレジット', qa: 'Q&A', guideline: '二次創作ガイドライン', timeline: '年表',
   characters: 'キャラクター', organizations: '組織', nations: '国家', lore: '社会', disasters: '根源災害', stories: '物語',
 }
 
@@ -99,10 +99,23 @@ const worldItem = (x, sub, info) => article(x, { title: clean(x.name), sub: clea
   page('', (x.sections ?? []).flatMap((s) => [['tab', clean(s.tab)], ...s.cards.flatMap((c) => cardLines(c, c.title || c.type))])),
 ])
 
+const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土']
+// 'YYYY-MM-DD' → 12月5日（土）
+const dayLabel = (date) => `${Number(date.slice(5, 7))}月${Number(date.slice(8, 10))}日（${WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()]}）`
+const timeRange = (x) => (x.start ? `${x.start}〜${x.end ?? ''}` : '')
+export const jstDate = (now) => new Date(now.getTime() + 9 * 3600e3).toISOString().slice(0, 10)
+
 const CONVERT = {
   news: (d) => (d.news ?? []).map((n) => article(n, { title: clean(n.title), sub: clean(n.date), summary: first(n.body) }, [], [
     page('', [...paragraphs(n.body), ...(n.link ? [['url', 'リンク', clean(n.link)]] : [])]),
   ])),
+
+  // 公式サイトの書き出しで、繰り返しは1回ずつに広げてある。書き出しの後に過ぎた日は落とす
+  calendar: (d, { today }) => (d.calendar ?? []).filter((e) => /^\d{4}-\d\d-\d\d$/.test(e.date) && e.date >= today).map((e) => article(e,
+    { title: clean(e.title), sub: [dayLabel(e.date), timeRange(e)].filter(Boolean).join(' '), summary: clean(e.place) || first(e.body), date: e.date, start: clean(e.start), end: clean(e.end), place: clean(e.place), repeat: clean(e.repeat), series: clean(e.series) },
+    [['日時', [dayLabel(e.date), timeRange(e)].filter(Boolean).join(' ')], ['場所', e.place], ['繰り返し', e.repeat]], [
+      page('', [...paragraphs(e.body), ...(e.url ? [['url', 'リンク', clean(e.url)]] : [])]),
+    ])),
 
   contents: (d) => (d.contents ?? []).map((c) => article(c, { title: clean(c.name), sub: clean(c.state), summary: clean(c.summary), kind: c.kind },
     [['状態', c.state], ['対応', c.platform], ['開催日程', c.schedule], ['開催時間', c.time], ['インスタンス', c.instance]], [
@@ -204,7 +217,7 @@ export function pack(sections, limit = PART_BYTES, slots = PART_SLOTS) {
 // charset: ワールドのフォントに入っている文字（無ければ照合しない）
 // previous: 配信中の目次。画像のマスを引き継ぐ（無ければ詰めて割り付ける）
 export function buildWorld(data, { now = new Date(), charset = null, previous = null } = {}) {
-  const lists = Object.fromEntries(KINDS.map((kind) => [kind, withRev(kind, CONVERT[kind](data))]))
+  const lists = Object.fromEntries(KINDS.map((kind) => [kind, withRev(kind, CONVERT[kind](data, { today: jstDate(now) }))]))
   const packed = pack(KINDS.map((kind) => [kind, JSON.stringify(lists[kind])]))
   const files = {}
   const parts = Array(PART_SLOTS).fill('')
