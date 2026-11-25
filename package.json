@@ -4,5 +4,8 @@
   "scripts": {
     "test": "node --test",
     "build": "node world/build.js"
+  },
+  "dependencies": {
+    "sharp": "0.35.5"
   }
 }

@@ -5,6 +5,11 @@ name: world
 # 定期実行は呼び出しが届かなかったときの拾い直し（GitHub の都合で遅れたり飛んだりする）
 on:
   workflow_dispatch:
+    inputs:
+      repack:
+        description: 画像のマスを詰め直す（消した画像の空きが増えたとき。全シートが読み直しになる）
+        type: boolean
+        default: false
   push:
     branches: [main]
   schedule:
@@ -34,10 +39,14 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+          cache: npm
+      - run: npm ci
       - run: npm test
 
       - name: ワールド用に変換する
-        run: node world/build.js "$SOURCE_URL" _site/v1
+        env:
+          REPACK: ${{ inputs.repack && '1' || '' }}
+        run: node world/build.js "$SOURCE_URL" _site/v1 "$PAGES_URL/v1/index.json"
 
       # 中身（rev）が配信中のものと同じなら出し直さない。push のときはこのリポジトリの中身が変わっているので常に出す
       - name: 変更を確認する
@@ -50,6 +59,11 @@ jobs:
           else
             echo "deploy=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # 画像を取得してシートを描く。時間がかかるので、配信するときだけ
+      - name: 画像のシートを描く
+        if: steps.changed.outputs.deploy == 'true'
+        run: node world/sheets.js _site/v1
 
       # これまでの URL（/StaffAuth.json）をそのまま保つ
       - if: steps.changed.outputs.deploy == 'true'

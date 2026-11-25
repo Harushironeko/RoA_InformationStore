@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { assign, imageNames, previousSlots, SHEET_VERSION, sheetsOf } from './images.js'
 
 export const SCHEMA_VERSION = 1
 export const PART_SLOTS = 8
@@ -201,7 +202,8 @@ export function pack(sections, limit = PART_BYTES, slots = PART_SLOTS) {
 }
 
 // charset: ワールドのフォントに入っている文字（無ければ照合しない）
-export function buildWorld(data, { now = new Date(), charset = null } = {}) {
+// previous: 配信中の目次。画像のマスを引き継ぐ（無ければ詰めて割り付ける）
+export function buildWorld(data, { now = new Date(), charset = null, previous = null } = {}) {
   const lists = Object.fromEntries(KINDS.map((kind) => [kind, withRev(kind, CONVERT[kind](data))]))
   const packed = pack(KINDS.map((kind) => [kind, JSON.stringify(lists[kind])]))
   const files = {}
@@ -216,15 +218,21 @@ export function buildWorld(data, { now = new Date(), charset = null } = {}) {
   const all = Object.keys(files).sort().map((name) => files[name]).join('')
   const chars = [...new Set(all)].filter((c) => c > ' ').sort().join('')
   const missing = charset ? [...chars].filter((c) => !charset.includes(c)) : []
+  // 画像のシート。中身（マス → 名前）だけでハッシュを決めるので、描く前に目次の rev が決まる
+  const { slots, dropped } = assign(imageNames(lists), previousSlots(previous?.images))
+  const sheets = sheetsOf(slots)
+  const sheetRevs = (list) => list.map((cells) => (cells ? hash(`${SHEET_VERSION}:${JSON.stringify(cells)}`) : ''))
+  const thumbs = sheetRevs(sheets.thumb)
+  const fulls = sheetRevs(sheets.full)
   const index = {
     schemaVersion: SCHEMA_VERSION,
     // rev は中身だけで決まる。配信側はこれが同じなら置き換えない（generatedAt だけの違いで読み直させない）
-    rev: hash(parts.join('.')),
+    rev: hash([...parts, ...thumbs, ...fulls].join('.')),
     generatedAt: new Date(now.getTime() + 9 * 3600e3).toISOString().replace(/\.\d+Z$/, '+09:00'),
     parts,
-    // 画像のシートは未実装。入ったら thumbs / fulls にハッシュ、images に「名前 → [シート, マス, 幅, 高さ]」が入る
-    thumbs: [],
-    fulls: [],
+    // シートごとのハッシュ（空文字は未使用）。images は sheets.js が描いた後に入る
+    thumbs,
+    fulls,
     where,
     // 一覧に出す種類の順と名前。種類が増えてもワールドを作り直さずに済む
     kinds: KINDS.map((kind) => [kind, KIND_LABELS[kind]]),
@@ -235,11 +243,16 @@ export function buildWorld(data, { now = new Date(), charset = null } = {}) {
     missingGlyphs: missing.join(''),
     // 字 → [[種類, 記事の ID, 題]]。公式サイト編集のトップに出して直してもらう
     missingAt: glyphPlaces(lists, missing),
+    // シートに入りきらなかった画像（ワールドでは画像なしで出る）
+    droppedImages: dropped,
+    // sheets.js が images に置き換える
+    imageSlots: slots,
   }
   return { index, files: { ...files, 'index.json': JSON.stringify(index), 'chars.txt': chars } }
 }
 
-async function main([source = 'https://vrcroa.net/data/public.json', out = '_site/v1']) {
+// previousUrl: 配信中の目次。REPACK=1 のときは読まずに、画像を詰め直す
+async function main([source = 'https://vrcroa.net/data/public.json', out = '_site/v1', previousUrl = 'https://harushironeko.github.io/RoA_InformationStore/v1/index.json']) {
   const text = /^https?:/.test(source) ? await (await fetch(source)).text() : readFileSync(source, 'utf8')
   const data = JSON.parse(text)
   if (data.schemaVersion !== 1) throw new Error(`public.json の schemaVersion が ${data.schemaVersion} です（1 だけ扱えます）`)
@@ -253,12 +266,21 @@ async function main([source = 'https://vrcroa.net/data/public.json', out = '_sit
   }
   const main = read('charset.txt')
   const charset = main === null ? null : main + (read('charset-fallback.txt') ?? '')
-  const { index, files } = buildWorld(data, { charset })
+  let previous = null
+  if (process.env.REPACK !== '1') {
+    try {
+      const res = await fetch(previousUrl, { cache: 'no-store' })
+      if (res.ok) previous = await res.json()
+    } catch { /* 初回や通信の失敗では詰めて割り付ける */ }
+  }
+  const { index, files } = buildWorld(data, { charset, previous })
   rmSync(out, { recursive: true, force: true })
   mkdirSync(out, { recursive: true })
   for (const [name, body] of Object.entries(files)) writeFileSync(join(out, name), body)
   console.log(`rev ${index.rev}: ${Object.entries(index.counts).map(([k, n]) => `${k} ${n}`).join(' / ')}`)
   console.log(Object.entries(index.bytes).map(([name, n]) => `${name} ${(n / 1024).toFixed(1)}KB`).join(' / '))
+  console.log(`画像 ${Object.keys(index.imageSlots).length} 枚（一覧用シート ${index.thumbs.filter(Boolean).length} 枚・詳細用 ${index.fulls.filter(Boolean).length} 枚）${previous ? '' : '、前の版を使わずに割り付け'}`)
+  if (index.droppedImages.length) console.log(`シートに入りきらない画像: ${index.droppedImages.join(', ')}`)
   for (const [c, places] of Object.entries(index.missingAt)) console.log(`フォントに無い字 ${c}（U+${c.codePointAt(0).toString(16).toUpperCase()}）: ${places.map(([kind, , title]) => `${kind}「${title}」`).join('、')}`)
 }
 
