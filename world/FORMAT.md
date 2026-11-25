@@ -21,17 +21,18 @@
 ```json
 {
   "schemaVersion": 1,
-  "rev": "1ccd44e191b3",
-  "generatedAt": "2026-11-26T04:04:55+09:00",
-  "parts": ["02b41871701b", "", "", "", "", "", "", ""],
+  "rev": "65b26594f73f",
+  "generatedAt": "2026-11-26T05:20:00+09:00",
+  "parts": ["…", "", "", "", "", "", "", ""],
   "thumbs": [],
   "fulls": [],
-  "where": { "news": 0, "contents": 0, "staff": 0, "qa": 0, "guideline": 0, "timeline": 0, "characters": 0,
-             "organizations": 0, "nations": 0, "lore": 0, "disasters": 0, "stories": 0 },
-  "counts": { "news": 0, "contents": 2, "staff": 0, "qa": 3, "guideline": 3, "timeline": 49, "characters": 38,
-              "organizations": 6, "nations": 8, "lore": 1, "disasters": 10, "stories": 4 },
-  "bytes": { "part-0.json": 188842 },
-  "missingGlyphs": ""
+  "where": { "news": 0, "contents": 0, "staff": 0, "qa": 0, …, "stories": 0 },
+  "kinds": [["news", "ニュース"], ["contents", "公式コンテンツ"], ["staff", "クレジット"], …],
+  "kindRevs": { "news": "…", "contents": "…", … },
+  "counts": { "news": 0, "contents": 2, "staff": 7, … },
+  "bytes": { "part-0.json": 201000 },
+  "missingGlyphs": "․❖伟",
+  "missingAt": { "❖": [["characters", "rKBoqirdCY2qGS8tlLsj", "逢魔幻斎"]] }
 }
 ```
 
@@ -40,9 +41,12 @@
 - `generatedAt` — 作った時刻（日本時間）。「○月○日 ○時の版」の表示用。`rev` が同じ間は変わらない
 - `parts[i]` — `part-i.json` のハッシュ。空文字は未使用。持っている値と違う枠だけ読み直す
 - `where[種類]` — その種類が入っている枠の番号。**種類と枠の対応は書き出しのたびに変わりうる**ので、決め打ちしない
+- `kinds` — 一覧に出す種類の順と名前。種類が増えてもワールドを作り直さずに済む。知らない種類はこの名前で一覧に出し、詳細は共通の作りで出せばよい
+- `kindRevs[種類]` — 種類ごとの中身のハッシュ。変わった種類だけ一覧を差し替える
 - `counts[種類]` — 件数。「新着あり」の表示用
 - `bytes` — 各ファイルの大きさ
-- `missingGlyphs` — `world/charset.txt`（ワールドのフォントに入っている文字）を置いたとき、そこに無い文字が入る
+- `missingGlyphs` — ワールドのフォント（`world/charset.txt` が本体、`world/charset-fallback.txt` がフォールバックでだけ出る字）に無い文字
+- `missingAt` — 無い字が出てくる記事（字 → `[種類, ID, 題]` の配列。1字5件まで）。公式サイト編集のトップに出して、元の文章を直してもらう
 
 ## part-N.json
 
@@ -68,8 +72,10 @@
 }
 ```
 
+- `rev` — 記事ごとの中身のハッシュ。前の版と `id` で突き合わせれば、足された・変わった・消えた記事を数えられる（「キャラクター 3件を更新しました」）
 - 一覧は `title`・`sub`・`summary` の3つで作れる。詳細は `info`（見出しと値の組。空の項目は入らない）と `pages`
 - `image` は画像の名前（置き場のファイル名）。画像が無い記事には `image` が無い。シートが入るまでは使えない
+- 根源災害の `danger` は文字列の数字。**`"0"` は危険度0で、空文字が調査中**。記事の `danger` とページ（`Top`）の `danger` は同じ値で、Log のページはそれぞれの値を持つ
 - `pages` は必ず1つ以上。根源災害だけ複数（`Top` と Log）で、ページに `id` と `danger` が付く。ほかの種類は `name` が空の1ページ
 - 種類ごとに足される項目
 
@@ -77,14 +83,14 @@
 | --- | --- | --- | --- |
 | `news` ニュース | 題 | 日付 `YYYY-MM-DD` | — |
 | `contents` 公式コンテンツ | 名前 | 状態（開催中 など） | `kind`: `event` / `world` / `other` |
-| `staff` クレジット | 班の名前 | 空 | —（人は `body` の `kv` 行） |
+| `staff` クレジット | 班の名前 | 人数（`5名`） | —（`summary` は名前を「、」でつないだもの。人は `body` の `kv` 行） |
 | `qa` Q&A | 分類の名前 | 件数 | —（質問が `h2`、答えが `p`） |
 | `guideline` 二次創作ガイドライン | 欄の名前（許可される行為 など） | 空 | — |
 | `characters` キャラクター | 名前 | 所属 | `tag`、`performer`（演者名） |
 | `organizations` 組織 | 名前 | 構成人数 / 設立年 | — |
 | `nations` 国家 | 名前 | 人口 | `pin`: `[x, y]`（地図 `world.webp` 上の 0〜1 の位置。無い国もある） |
 | `lore` 社会 | 名前 | 年代 | — |
-| `disasters` 根源災害 | 名前 | 番号（`Alc-330` など） | `number`、`danger`（空は調査中）、`category`、`note`（一覧の注意書き） |
+| `disasters` 根源災害 | 名前 | 番号（`Alc-330` など） | `number`、`danger`、`category`、`note`（一覧の注意書き） |
 | `stories` 物語 | 題 | 著者 / 公開日 | `author`、`date` |
 
 ## 本文の行（`pages[].body`）

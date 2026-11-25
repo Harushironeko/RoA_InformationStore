@@ -50,11 +50,29 @@ describe('目次', () => {
     assert.equal(a.rev, b.rev)
     assert.notEqual(a.rev, c.rev)
   })
-  it('フォントに無い字を挙げる', () => {
+  it('フォントに無い字と、出てくる記事を挙げる', () => {
     const data = { ...empty, news: [{ id: 'n', title: '杖', date: '', body: '', link: '' }] }
     const { files } = buildWorld(data)
     assert.equal(buildWorld(data, { charset: files['chars.txt'] }).index.missingGlyphs, '')
-    assert.equal(buildWorld(data, { charset: files['chars.txt'].replace('杖', '') }).index.missingGlyphs, '杖')
+    const { index } = buildWorld(data, { charset: files['chars.txt'].replace('杖', '') })
+    assert.equal(index.missingGlyphs, '杖')
+    assert.deepEqual(index.missingAt, { 杖: [['news', 'n', '杖']] })
+  })
+
+  it('種類の名前と順、種類ごとのハッシュを持つ', () => {
+    const { index } = buildWorld(empty)
+    assert.deepEqual(index.kinds.map(([kind]) => kind), KINDS)
+    assert.equal(index.kinds.find(([kind]) => kind === 'disasters')[1], '根源災害')
+    const news = buildWorld({ ...empty, news: [{ id: 'n', title: 't', date: '', body: '', link: '' }] }).index
+    assert.notEqual(news.kindRevs.news, index.kindRevs.news)
+    assert.equal(news.kindRevs.characters, index.kindRevs.characters)
+  })
+
+  it('記事ごとの rev は中身が変われば変わる', () => {
+    const one = (title) => part({ news: [{ id: 'n', title, date: '', body: '', link: '' }] }, 'news')[0].rev
+    assert.match(one('a'), /^[0-9a-f]{12}$/)
+    assert.equal(one('a'), one('a'))
+    assert.notEqual(one('a'), one('b'))
   })
 })
 
@@ -77,6 +95,7 @@ describe('種類ごとの変換', () => {
     const staff = { groups: [{ name: '制作', namesOnly: false, leader: person('甲'), members: [person('乙', '美術')] }, { name: '協力', namesOnly: true, leader: null, members: [person('丙')] }] }
     const list = part({ staff }, 'staff')
     assert.deepEqual(list[0].pages[0].body, [['kv', 'リーダー', '甲', ''], ['kv', '美術', '乙', '']])
+    assert.deepEqual([list[0].sub, list[0].summary, list[1].sub], ['2名', '甲、乙', '1名'])
     assert.deepEqual(list[1].pages[0].body, [['kv', '', '丙', '']])
   })
 

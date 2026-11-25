@@ -12,6 +12,11 @@ export const PART_BYTES = 300 * 1024
 export const LINE_CHARS = 2000
 // 目次に載せる順（＝枠に詰める順）。短くてよく見るものを前に置く
 export const KINDS = ['news', 'contents', 'staff', 'qa', 'guideline', 'timeline', 'characters', 'organizations', 'nations', 'lore', 'disasters', 'stories']
+// ワールドの一覧に出す名前（目次の kinds）。並びは KINDS と同じ
+export const KIND_LABELS = {
+  news: 'ニュース', contents: '公式コンテンツ', staff: 'クレジット', qa: 'Q&A', guideline: '二次創作ガイドライン', timeline: '年表',
+  characters: 'キャラクター', organizations: '組織', nations: '国家', lore: '社会', disasters: '根源災害', stories: '物語',
+}
 
 // TextMeshPro がタグとして読まないよう < を全角にする。改行は \n にそろえる。
 // 両端の空白と改行は落とすが、全角の空白は字下げに使われるので残す
@@ -105,7 +110,7 @@ const CONVERT = {
 
   // 班ごとに1件。リーダーの肩書が空で他にメンバーがいれば「リーダー」
   staff: (d) => (d.staff?.groups ?? []).map((g, i) => ({
-    id: `staff-${i}`, title: clean(g.name), sub: '', summary: '', info: [],
+    id: `staff-${i}`, title: clean(g.name), sub: `${(g.leader ? 1 : 0) + g.members.length}名`, summary: [g.leader, ...g.members].filter(Boolean).map((m) => clean(m.name)).join('、'), info: [],
     pages: [page('', [
       ...(g.leader ? [['kv', clean(g.leader.title) || (g.members.length ? 'リーダー' : ''), clean(g.leader.name), clean(g.leader.url)]] : []),
       ...g.members.map((m) => ['kv', clean(m.title), clean(m.name), clean(m.url)]),
@@ -136,7 +141,7 @@ const CONVERT = {
   nations: (d) => (d.nations ?? []).map((x) => worldItem(x, x.population && `人口 ${clean(x.population)}`, [['人口', x.population]])),
   lore: (d) => (d.lore ?? []).map((x) => worldItem(x, x.year && `${clean(x.year)}年`, [['年代', x.year]])),
 
-  // 本体がページ「Top」、Log が続く。危険度が空なら調査中
+  // 本体がページ「Top」、Log が続く。危険度は "0" が危険度0、空文字が調査中（記事もページも同じ）
   disasters: (d) => (d.disasters ?? []).map((x) => {
     const body = (p) => [...(clean(p.overview) ? [['h', '概要'], ...paragraphs(p.overview)] : []), ...(p.cards ?? []).flatMap((c) => cardLines(c, c.title))]
     return article(x, { title: clean(x.name), sub: clean(x.number), summary: clean(x.note) || first(x.overview), number: clean(x.number), danger: clean(x.danger), category: clean(x.category), note: clean(x.note) },
@@ -162,6 +167,21 @@ const CONVERT = {
 }
 
 const hash = (text) => createHash('sha256').update(text).digest('hex').slice(0, 12)
+// 記事ごとの rev（中身のハッシュ）。ワールドは前の版と比べて、足された・変わった・消えた記事を数える。年表は1行ずつが記事の代わり
+const withRev = (kind, list) => (kind === 'timeline' ? list : list.map((x) => ({ ...x, rev: hash(JSON.stringify(x)) })))
+// フォントに無い字が、どの記事に出てくるか（1字につき5件まで）
+function glyphPlaces(lists, missing) {
+  const places = {}
+  for (const kind of KINDS) {
+    for (const x of lists[kind]) {
+      const text = JSON.stringify(x)
+      const title = kind === 'timeline' ? clean(x[4]) : x.title
+      const id = kind === 'timeline' ? '' : x.id
+      for (const c of missing) if (text.includes(c) && (places[c] ??= []).length < 5) places[c].push([kind, id, title])
+    }
+  }
+  return places
+}
 const bytes = (text) => Buffer.byteLength(text)
 
 // 種類を順に枠へ詰める。1つの種類は分けない（1種類だけで上限を超えたら、その種類だけで1枠使う）
@@ -182,7 +202,7 @@ export function pack(sections, limit = PART_BYTES, slots = PART_SLOTS) {
 
 // charset: ワールドのフォントに入っている文字（無ければ照合しない）
 export function buildWorld(data, { now = new Date(), charset = null } = {}) {
-  const lists = Object.fromEntries(KINDS.map((kind) => [kind, CONVERT[kind](data)]))
+  const lists = Object.fromEntries(KINDS.map((kind) => [kind, withRev(kind, CONVERT[kind](data))]))
   const packed = pack(KINDS.map((kind) => [kind, JSON.stringify(lists[kind])]))
   const files = {}
   const parts = Array(PART_SLOTS).fill('')
@@ -195,6 +215,7 @@ export function buildWorld(data, { now = new Date(), charset = null } = {}) {
   })
   const all = Object.keys(files).sort().map((name) => files[name]).join('')
   const chars = [...new Set(all)].filter((c) => c > ' ').sort().join('')
+  const missing = charset ? [...chars].filter((c) => !charset.includes(c)) : []
   const index = {
     schemaVersion: SCHEMA_VERSION,
     // rev は中身だけで決まる。配信側はこれが同じなら置き換えない（generatedAt だけの違いで読み直させない）
@@ -205,9 +226,15 @@ export function buildWorld(data, { now = new Date(), charset = null } = {}) {
     thumbs: [],
     fulls: [],
     where,
+    // 一覧に出す種類の順と名前。種類が増えてもワールドを作り直さずに済む
+    kinds: KINDS.map((kind) => [kind, KIND_LABELS[kind]]),
+    // 種類ごとの中身のハッシュ。変わった種類だけ一覧を差し替える
+    kindRevs: Object.fromEntries(KINDS.map((kind) => [kind, hash(JSON.stringify(lists[kind]))])),
     counts: Object.fromEntries(KINDS.map((kind) => [kind, lists[kind].length])),
     bytes: Object.fromEntries(Object.entries(files).map(([name, text]) => [name, bytes(text)])),
-    missingGlyphs: charset ? [...chars].filter((c) => !charset.includes(c)).join('') : '',
+    missingGlyphs: missing.join(''),
+    // 字 → [[種類, 記事の ID, 題]]。公式サイト編集のトップに出して直してもらう
+    missingAt: glyphPlaces(lists, missing),
   }
   return { index, files: { ...files, 'index.json': JSON.stringify(index), 'chars.txt': chars } }
 }
@@ -216,17 +243,23 @@ async function main([source = 'https://vrcroa.net/data/public.json', out = '_sit
   const text = /^https?:/.test(source) ? await (await fetch(source)).text() : readFileSync(source, 'utf8')
   const data = JSON.parse(text)
   if (data.schemaVersion !== 1) throw new Error(`public.json の schemaVersion が ${data.schemaVersion} です（1 だけ扱えます）`)
-  let charset = null
-  try {
-    charset = readFileSync(new URL('./charset.txt', import.meta.url), 'utf8')
-  } catch { /* 文字一覧を置くまでは照合しない */ }
+  // charset.txt はワールドの本体フォントの収録文字、charset-fallback.txt は本体に無くてもフォールバックで出る字
+  const read = (name) => {
+    try {
+      return readFileSync(new URL(`./${name}`, import.meta.url), 'utf8')
+    } catch {
+      return null
+    }
+  }
+  const main = read('charset.txt')
+  const charset = main === null ? null : main + (read('charset-fallback.txt') ?? '')
   const { index, files } = buildWorld(data, { charset })
   rmSync(out, { recursive: true, force: true })
   mkdirSync(out, { recursive: true })
   for (const [name, body] of Object.entries(files)) writeFileSync(join(out, name), body)
   console.log(`rev ${index.rev}: ${Object.entries(index.counts).map(([k, n]) => `${k} ${n}`).join(' / ')}`)
   console.log(Object.entries(index.bytes).map(([name, n]) => `${name} ${(n / 1024).toFixed(1)}KB`).join(' / '))
-  if (index.missingGlyphs) console.log(`フォントに無い字: ${index.missingGlyphs}`)
+  for (const [c, places] of Object.entries(index.missingAt)) console.log(`フォントに無い字 ${c}（U+${c.codePointAt(0).toString(16).toUpperCase()}）: ${places.map(([kind, , title]) => `${kind}「${title}」`).join('、')}`)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
