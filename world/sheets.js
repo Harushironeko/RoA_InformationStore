@@ -98,7 +98,10 @@ export async function renderSheets(index, out, { fetcher = fetch } = {}) {
 
 async function main([out = '_site/v1']) {
   const path = join(out, 'index.json')
-  const { index, failed } = await renderSheets(JSON.parse(readFileSync(path, 'utf8')), out)
+  const built = JSON.parse(readFileSync(path, 'utf8'))
+  // 描いた後の目次には imageSlots が無い。2回続けて動かすと画像の位置が消えるので止める
+  if (!built.imageSlots) throw new Error('先に world/build.js を動かしてください（この目次はシートを描いた後のものです）')
+  const { index, failed } = await renderSheets(built, out)
   writeFileSync(path, JSON.stringify(index))
   console.log(`画像 ${Object.keys(index.images).length} 枚、一覧用シート ${index.thumbs.filter(Boolean).length} 枚、詳細用シート ${index.fulls.filter(Boolean).length} 枚`)
   for (const line of failed) console.log(`取得できなかった画像 ${line}`)
